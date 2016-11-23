@@ -1,0 +1,39 @@
+# HARDENED sample ssh configuration file
+X11Forwarding no
+UsePrivilegeSeparation yes
+UsePAM no
+UseLogin no
+TCPKeepAlive no
+SyslogFacility AUTH
+Subsystem sftp /usr/lib/openssh/sftp-server
+StrictModes yes
+ServerKeyBits 1024
+RSAAuthentication yes
+RhostsRSAAuthentication no
+PubkeyAuthentication yes
+Protocol 2
+PrintMotd no
+PrintLastLog yes
+Port 46964
+PermitRootLogin no
+PermitEmptyPasswords no
+PermitBlacklistedKeys no
+PasswordAuthentication no
+MaxStartups 10:30:60
+MaxAuthTries 2
+LogLevel INFO
+LoginGraceTime 60
+KeyRegenerationInterval 3600
+IgnoreUserKnownHosts yes
+IgnoreRhosts yes
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_dsa_key
+HostbasedAuthentication no
+ClientAliveInterval 600
+ClientAliveCountMax 3
+ChallengeResponseAuthentication no
+AddressFamily inet
+AcceptEnv LANG LC_*
+# HARDENED sample ssh configuration file
