@@ -167,20 +167,11 @@ install_at_job () {
   }
 
   [ $verifyflag = "true" ] && {
-    checkvalue = $( crontab -l | grep -i -F "$croncmd" | wc -c )
-    status="unavailable"
+    checkvalue=$( crontab -l 2>/dev/null | grep -i -F "$croncmd" | wc -c )
+    status="uninstalled"
     [ $checkvalue -gt 6 ] && status="installed"
-    echo "Hardening::Cronjob::\t$status"
+    printf "Security:Cronjob: \t $status\n"
   }
-
-}
-
-install_script () {
-
-  ${verboseflag}
-  download_script
-  copy_files
-  install_at_job
 
 }
 
@@ -196,8 +187,8 @@ turn_on_firewall () {
   ${verboseflag}
 
   [ $installflag = "true" ] && {
-    checkvalue=$( dpkg --list | egrep -i 'ufw' | wc -l )
-    [ $checkvalue -lt 1 ] && {
+    checkvalue=$( dpkg --list | egrep -i 'ufw|fail2ban' | wc -l )
+    [ $checkvalue -lt 2 ] && {
       { 
         sudo apt-get install ufw -y 
 
@@ -216,10 +207,10 @@ turn_on_firewall () {
   }
 
   [ $verifyflag = "true" ] && {
-    checkvalue=$( dpkg --list | egrep -i 'ufw' | wc -l )
-    status="unavailable"
-    [ $checkvalue -ge 1 ] && status="installed"
-    echo "Hardening::Firewall::\t$status"
+    checkvalue=$( dpkg --list | egrep -i 'ufw|fail2ban' | wc -l )
+    status="uninstalled"
+    [ $checkvalue -ge 2 ] && status="installed"
+    printf "Security:Firewall: \t $status\n"
   }
 
 }
@@ -232,14 +223,16 @@ turn_off_setbits () {
 
   ${verboseflag}
 
+  fileoutput="/tmp/fileoutput"
+
   [ $installflag = "true" ] && {
     filelist=""
     for permset in {1,2,3,4,5,6,7}000
     do 
       find / -user root -type f -perm -${permset} -print 2>/dev/null | \
-      egrep -v '(sudo|mount|ping)' | read files
-      filelist="$filelist ${files}"
+      egrep -v '(sudo|mount|ping)' >> $fileoutput
     done
+    filelist=$( cat $fileoutput )
     for file in ${filelist}
     do
       sudo chmod ugo-s $file
@@ -252,15 +245,16 @@ turn_off_setbits () {
     for permset in {1,2,3,4,5,6,7}000
     do 
       find / -user root -type f -perm -${permset} -print 2>/dev/null | \
-      egrep -v '(sudo|mount|ping)' | read files
-      filelist="$filelist ${files}"
+      egrep -v '(sudo|mount|ping)' >> $fileoutput
     done
-    checkvalue = $( echo ${filelist} | sort -rbn | wc -w )
-    status="unchanged"
-    [ $checkvalue -lt 5 ] && status="hardened"
-    echo "Hardening::SetIDFiles::\t$status"
+    checkvalue=$( cat $fileoutput | sort -rbn | wc -l )
+    status="uninstalled"
+    [ $checkvalue -lt 5 ] && status="installed"
+    printf "Security:SetIDFiles: \t $status\n"
   }
   
+  rm -f $fileoutput
+
 }
 
 #
@@ -273,7 +267,7 @@ secure_shared_memory () {
   fstab="/etc/fstab"
 
   [ $installflag = "true" ] && {
-    checkvalue = $( cat $fstab | egrep -i shm | egrep -i nosuid | egrep -i noexec | wc -c )
+    checkvalue=$( cat $fstab | egrep -i shm | egrep -i nosuid | egrep -i noexec | wc -c )
     [ -f $fstab ] && {
       rm -f $fstab.orig
       cp -p $fstab $fstab.orig
@@ -284,10 +278,10 @@ secure_shared_memory () {
   }
 
   [ $verifyflag = "true" ] && {
-    checkvalue = $( cat $fstab | egrep -i shm | egrep -i nosuid | egrep -i noexec | wc -c )
-    status="unchanged"
-    [ $checkvalue -ge 10 ] && status="hardened"
-    echo "Hardening::SharedMem::\t$status"
+    checkvalue=$( cat $fstab | egrep -i shm | egrep -i nosuid | egrep -i noexec | wc -c )
+    status="uninstalled"
+    [ $checkvalue -ge 10 ] && status="installed"
+    printf "Security:SharedMem: \t $status\n"
   }
 }
 
@@ -307,8 +301,8 @@ make_admin_group () {
 
   [ $verifyflag = "true" ] && {
     status="uninstalled"
-    [ $checkvalue -ge 1 ] && status="created"
-    echo "Hardening::AdminGrp::\t$status"
+    [ $checkvalue -ge 1 ] && status="installed"
+    printf "Security:AdminGrp: \t $status\n"
   }
 
 }
@@ -340,10 +334,10 @@ harden_sshd_config () {
   }
 
   [ $verifyflag = "true" ] && {
-    status="unchanged"
+    status="uninstalled"
     checkvalue=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
-    [ $checkvalue -ge 1 ] && status="hardened"
-    echo "Hardening::SShdConfig::\t$status"
+    [ $checkvalue -ge 1 ] && status="installed"
+    printf "Security:SShdConfig: \t $status\n"
   }
 
 }
@@ -374,10 +368,10 @@ harden_sysctl () {
   }
 
   [ $verifyflag = "true" ] && {
-    status="unchanged"
+    status="uninstalled"
     checkvalue=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
-    [ $checkvalue -ge 1 ] && status="hardened"
-    echo "Hardening::SysctlCfg::\t$status"
+    [ $checkvalue -ge 1 ] && status="installed"
+    printf "Security:SysctlCfg: \t $status\n"
   }
 
 }
@@ -388,17 +382,17 @@ prevent_ip_spoofing () {
   cfgfiledst="/etc/host.conf"
 
   [ $installflag = "true" ] && {
-    checkvalue=$( cat $cfgfile | egrep -i spoof | egrep -i no | wc -l )
+    checkvalue=$( cat $cfgfiledst | egrep -i spoof | egrep -i no | wc -l )
     [ $checkvalue -lt 1 ] && {
       sudo echo "nospoof on" >> $cfgfiledst
     }
   }
 
   [ $verifyflag = "true" ] && {
-    status="disabled"
-    checkvalue=$( cat $cfgfile | egrep -i spoof | egrep -i no | wc -l )
-    [ $checkvalue -ge 1 ] && status="enabled"
-    echo "Hardening::NoIPSpoof::\t$status"
+    status="uninstalled"
+    checkvalue=$( cat $cfgfiledst | egrep -i spoof | egrep -i no | wc -l )
+    [ $checkvalue -ge 1 ] && status="installed"
+    printf "Security:NoIPSpoof: \t $status\n"
   }
 
 }
@@ -420,10 +414,10 @@ setup_app_armor () {
   }
 
   [ $verifyflag = "true" ] && {
-    status="unavailable"
+    status="uninstalled"
     checkvalue=$( dpkg --list | egrep -i 'apparmor' | wc -l )
     [ $checkvalue -ge 1 ] && status="installed"
-    echo "Hardening::AppArmor::\t$status"
+    printf "Security:AppArmor: \t $status\n"
   }
 
 }
@@ -445,9 +439,10 @@ setup_rootkit_checks () {
     }
   }
   [ $verifyflag = "true" ] && {
-    status="unavailable"
+    status="uninstalled"
+    checkvalue=$( dpkg --list | egrep -i 'chkrootkit' | wc -l )
     [ $checkvalue -ge 1 ] && status="installed"
-    echo "Hardening::Chkrootkit::\t$status"
+    printf "Security:Chkrootkit: \t $status\n"
   }
 
   [ $installflag = "true" ] && {
@@ -463,9 +458,10 @@ setup_rootkit_checks () {
     }
   }
   [ $verifyflag = "true" ] && {
-    status="unavailable"
+    status="uninstalled"
+    checkvalue=$( dpkg --list | egrep -i 'rkhunter' | wc -l )
     [ $checkvalue -ge 1 ] && status="installed"
-    echo "Hardening::RKhunter::\t$status"
+    printf "Security:RKhunter: \t $status\n"
   }
 
 }
@@ -474,6 +470,7 @@ harden_host () {
 
   ${verboseflag}
 
+  install_at_job
   turn_on_firewall
   turn_off_setbits
   secure_shared_memory
@@ -498,7 +495,12 @@ initialize_options () {
 main_logic () { 
 
   initialize_variables
-  install_script
+
+  [ $installflag = "true" ] && {
+    download_script
+    copy_files
+  }
+
   harden_host
 
 }
