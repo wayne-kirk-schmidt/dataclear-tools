@@ -3,8 +3,10 @@
 ### SCRIPTNAME [ options ] a script to harden Ubuntu Operating System
 ###
 ###	-h | --help		display this message and exit
-###	-v | --verbose		run verbosely for debugging purposes
+###	-d | --debug		run verbosely for debugging purposes
 ###	-c | --checksum 	checksum script, display it, and exit
+###	-v | --verify  		insure that the script ran successfully
+###	-i | --install  	run the specific commands required
 ###
 ### The script is currently run from: BASEDIR
 ### The script install files into the following:
@@ -63,7 +65,7 @@ initialize_variables () {
   ${verboseflag}
   umask 022
   PATH="/usr/bin:/usr/sbin:/bin:/sbin:$PATH"	&& export PATH
-  scriptname=$( basename $0 ) 			&& export scriptname
+  scriptname=$( basename $0 )			&& export scriptname
   base=$( ls -Ld $PWD )				&& export basedir
   installdir="/var/tmp/hardening"		&& export installdir
   bindir=${installdir}/bin			&& export bindir
@@ -78,20 +80,20 @@ initialize_variables () {
   
   for sumexe in sum md5sum sha1sum sha256sum 
   do
-	whichresult=$( which $sumexe )
-	[ $( echo $whichresult | wc -c ) -gt 1 ] && {
-		sumtype=$sumexe
-		sumcmd=$whichresult
-	}
+    whichresult=$( which $sumexe )
+    [ $( echo $whichresult | wc -c ) -gt 1 ] && {
+      sumtype=$sumexe
+      sumcmd=$whichresult
+    }
   done
-	
+  
   [ $checksumflag = "true" ] && {
-	sumresult=$( $sumcmd $0 | awk '{print$1}' )
-	echo "$sumtype:$sumresult"
-	exit 0
+    sumresult=$( $sumcmd $0 | awk '{print$1}' )
+    echo "$sumtype:$sumresult"
+    exit 0
   }
 
-  sleeptime=$((($RANDOM % 100 + 1) + 20))	&& export sleeptime
+  sleeptime=$((($RANDOM % 100 + 1) + 20))  && export sleeptime
 
 }
 
@@ -146,8 +148,8 @@ copy_files () {
       export dstfile
       [ -f $dstfile ] || cp -f $srcfile $dstfile
       [ -f $dstfile ] && { 
-	srcsum=$( $sumcmd $srcfile 2>/dev/null | awk '{print$1}' )
-	dstsum=$( $sumcmd $dstfile 2>/dev/null | awk '{print$1}' )
+        srcsum=$( $sumcmd $srcfile 2>/dev/null | awk '{print$1}' )
+        dstsum=$( $sumcmd $dstfile 2>/dev/null | awk '{print$1}' )
         [ $srcsum != $dstsum ] && cp -f $srcfile $dstfile 
       }
     }
@@ -159,7 +161,17 @@ install_at_job () {
   ${verboseflag}
   croncmd="$dstfile"
   cronjob="0 * * * * $dstfile"
-  ( crontab -l | grep -v -F "$croncmd" ; echo "$cronjob" ) | crontab -
+
+  [ $installflag = "true" ] && {
+    ( crontab -l | grep -v -F "$croncmd" ; echo "$cronjob" ) | crontab -
+  }
+
+  [ $verifyflag = "true" ] && {
+    checkvalue = $( crontab -l | grep -i -F "$croncmd" | wc -c )
+    status="unavailable"
+    [ $checkvalue -gt 6 ] && status="installed"
+    echo "Hardening::Cronjob::\t$status"
+  }
 
 }
 
@@ -183,32 +195,32 @@ turn_on_firewall () {
 
   ${verboseflag}
 
-  pkgcount=$( dpkg --list | egrep -i 'ufw' | wc -l )
-  [ $pkgcount -lt 1 ] && {
-    {
-      sudo apt-get install ufw -y
-    } 2>$logfile 1>&2
+  [ $installflag = "true" ] && {
+    checkvalue=$( dpkg --list | egrep -i 'ufw' | wc -l )
+    [ $checkvalue -lt 1 ] && {
+      { 
+        sudo apt-get install ufw -y 
+
+        sudo apt-get install fail2ban -y
+        sudo systemctl start fail2ban
+        sudo systemctl enable fail2ban
+
+        sudo ufw default deny incoming
+        sudo ufw default allow outgoing
+        sudo ufw logging on
+
+        echo y | sudo ufw enable 
+
+      } 2>$logfile 1>&2
+    }
   }
 
-  pkgcount=$( dpkg --list | egrep -i 'ufw' | wc -l )
-  [ $pkgcount -lt 1 ] && {
-    {
-      sudo apt-get install fail2ban -y
-      sudo systemctl start fail2ban
-      sudo systemctl enable fail2ban
-    } 2>$logfile 1>&2
+  [ $verifyflag = "true" ] && {
+    checkvalue=$( dpkg --list | egrep -i 'ufw' | wc -l )
+    status="unavailable"
+    [ $checkvalue -ge 1 ] && status="installed"
+    echo "Hardening::Firewall::\t$status"
   }
-
-  {
-    sudo ufw default deny incoming
-    sudo ufw default allow outgoing
-    # sudo ufw allow ssh
-    # sudo ufw limit ssh
-    # sudo ufw limit OpenSSH
-    sudo ufw logging on
-    echo y | sudo ufw enable 
-
-  } 2>$logfile 1>&2
 
 }
 
@@ -219,22 +231,36 @@ turn_on_firewall () {
 turn_off_setbits () {
 
   ${verboseflag}
-  for permset in {4,5,6}000
-  do
-    find / -user root -perm -${permset} -print 2>/dev/null |\
-    while read file
-    do
-      target=$( basename $file )
-      whichresult=$( which $target | wc -c )
-      [ $whichresult -le 1 ] && {
-        [[ $file =~ ^(su|mount|passwd)$ ]] || {
-	  chmod ugo-s $file
-          echo "chmod ugo-s $file" 2>$logfile 1>&2
-        }
-      }
-    done
-  done
 
+  [ $installflag = "true" ] && {
+    filelist=""
+    for permset in {1,2,3,4,5,6,7}000
+    do 
+      find / -user root -type f -perm -${permset} -print 2>/dev/null | \
+      egrep -v '(sudo|mount|ping)' | read files
+      filelist="$filelist ${files}"
+    done
+    for file in ${filelist}
+    do
+      sudo chmod ugo-s $file
+      echo "chmod ugo-s $file" 2>$logfile 1>&2
+    done
+  }
+
+  [ $verifyflag = "true" ] && {
+    filelist=""
+    for permset in {1,2,3,4,5,6,7}000
+    do 
+      find / -user root -type f -perm -${permset} -print 2>/dev/null | \
+      egrep -v '(sudo|mount|ping)' | read files
+      filelist="$filelist ${files}"
+    done
+    checkvalue = $( echo ${filelist} | sort -rbn | wc -w )
+    status="unchanged"
+    [ $checkvalue -lt 5 ] && status="hardened"
+    echo "Hardening::SetIDFiles::\t$status"
+  }
+  
 }
 
 #
@@ -243,14 +269,25 @@ turn_off_setbits () {
 secure_shared_memory () {
 
   ${verboseflag}
+
   fstab="/etc/fstab"
-  [ -f $fstab ] && {
-    rm -f $fstab.orig
-    cp -p $fstab $fstab.orig
-    fstabcount=$( egrep -i tmpfs $fstab | egrep -i shm | wc -c )
-    [ $fstabcount -gt 10 ] || {
-      echo "tmpfs     /dev/shm     tmpfs     defaults,noexec,nosuid     0     0" >> $fstab
+
+  [ $installflag = "true" ] && {
+    checkvalue = $( cat $fstab | egrep -i shm | egrep -i nosuid | egrep -i noexec | wc -c )
+    [ -f $fstab ] && {
+      rm -f $fstab.orig
+      cp -p $fstab $fstab.orig
+      [ $checkvalue -lt 10 ] || {
+        sudo echo "tmpfs     /dev/shm     tmpfs     defaults,noexec,nosuid     0     0" >> $fstab
+      }
     }
+  }
+
+  [ $verifyflag = "true" ] && {
+    checkvalue = $( cat $fstab | egrep -i shm | egrep -i nosuid | egrep -i noexec | wc -c )
+    status="unchanged"
+    [ $checkvalue -ge 10 ] && status="hardened"
+    echo "Hardening::SharedMem::\t$status"
   }
 }
 
@@ -260,9 +297,19 @@ secure_shared_memory () {
 make_admin_group () {
 
   ${verboseflag}
+
   admgroup="secadm"
-  groupcheck=$( compgen -g | egrep -i $admgroup | wc -l ) 
-  [ $groupcheck -lt 1 ] && sudo groupadd $admgroup
+
+  [ $installflag = "true" ] && {
+    checkvalue=$( compgen -g | egrep -i $admgroup | wc -l ) 
+    [ $checkvalue -lt 1 ] && sudo groupadd $admgroup
+  }
+
+  [ $verifyflag = "true" ] && {
+    status="uninstalled"
+    [ $checkvalue -ge 1 ] && status="created"
+    echo "Hardening::AdminGrp::\t$status"
+  }
 
 }
 
@@ -277,16 +324,28 @@ harden_sshd_config () {
   cfgfilesrc="$cfgdir/sshd_config.harden"
   cfgfiledst="/etc/ssh/sshd_config"
   cfgfilebkp="$cfgdir/sshd_config.master"
-  [ -f $cfgfiledst ] && {
-    [ ! -f $cfgfilebkp ] && cp -p $cfgfiledst $cfgfilebkp
-    [ -f $cfgfilesrc ] && {
-      candidate=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
-      [ $candidate -lt 1 ] && {
-	# cp -p $cfgfilesrc $cfgfiledst
-	chmod 644 $cfgfiledst
+
+  [ $installflag = "true" ] && {
+    [ -f $cfgfiledst ] && {
+      [ ! -f $cfgfilebkp ] && cp -p $cfgfiledst $cfgfilebkp
+      [ -f $cfgfilesrc ] && {
+        checkvalue=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
+        [ $checkvalue -lt 1 ] && {
+          sudo cp -p $cfgfilesrc $cfgfiledst
+          sudo chmod 644 $cfgfiledst
+          sudo service ssh restart
+        }
       }
     }
   }
+
+  [ $verifyflag = "true" ] && {
+    status="unchanged"
+    checkvalue=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
+    [ $checkvalue -ge 1 ] && status="hardened"
+    echo "Hardening::SShdConfig::\t$status"
+  }
+
 }
 
 #
@@ -299,25 +358,47 @@ harden_sysctl () {
   cfgfiledst="/etc/sysctl.conf"
   cfgfilesrc="$cfgdir/sysctl.conf.harden"
   cfgfilebkp="$cfgdir/sysctl.conf.master"
-  [ -f $cfgfiledst ] && {
-    [ ! -f $cfgfilebkp ] && cp -p $cfgfiledst $cfgfilebkp
-    [ -f $cfgfilesrc ] && {
-      candidate=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
-      [ $candidate -lt 1 ] && {
-        cat $cfgfilesrc >> $cfgfiledst
-        chmod 644 $cfgfiledst
-        sudo sysctl -p
+
+  [ $installflag = "true" ] && {
+    [ -f $cfgfiledst ] && {
+      [ ! -f $cfgfilebkp ] && cp -p $cfgfiledst $cfgfilebkp
+      [ -f $cfgfilesrc ] && {
+        checkvalue=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
+        [ $checkvalue -lt 1 ] && {
+          sudo cat $cfgfilesrc >> $cfgfiledst
+          sudo chmod 644 $cfgfiledst
+          sudo sysctl -p
+        }
       }
     }
   }
+
+  [ $verifyflag = "true" ] && {
+    status="unchanged"
+    checkvalue=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
+    [ $checkvalue -ge 1 ] && status="hardened"
+    echo "Hardening::SysctlCfg::\t$status"
+  }
+
 }
 
 prevent_ip_spoofing () {
 
   ${verboseflag}
-  cfgfile="/etc/host.conf"
-  [ $( cat $cfgfile | egrep -i spoof | egrep -i no | wc -l ) -lt 1 ] && {
-	echo "nospoof on" >> $cfgfile
+  cfgfiledst="/etc/host.conf"
+
+  [ $installflag = "true" ] && {
+    checkvalue=$( cat $cfgfile | egrep -i spoof | egrep -i no | wc -l )
+    [ $checkvalue -lt 1 ] && {
+      sudo echo "nospoof on" >> $cfgfiledst
+    }
+  }
+
+  [ $verifyflag = "true" ] && {
+    status="disabled"
+    checkvalue=$( cat $cfgfile | egrep -i spoof | egrep -i no | wc -l )
+    [ $checkvalue -ge 1 ] && status="enabled"
+    echo "Hardening::NoIPSpoof::\t$status"
   }
 
 }
@@ -328,11 +409,21 @@ prevent_ip_spoofing () {
 setup_app_armor () {
 
   ${verboseflag}
-  pkgcount=$( dpkg --list | egrep -i 'apparmor' | wc -l )
-  [ $pkgcount -lt 1 ] && {
-    {
-      sudo apt-get install apparmor apparmor-profiles -y
-    } 2>$logfile 1>&2
+
+  [ $installflag = "true" ] && {
+    checkvalue=$( dpkg --list | egrep -i 'apparmor' | wc -l )
+    [ $checkvalue -lt 1 ] && {
+      {
+        sudo apt-get install apparmor apparmor-profiles -y
+      } 2>$logfile 1>&2
+    }
+  }
+
+  [ $verifyflag = "true" ] && {
+    status="unavailable"
+    checkvalue=$( dpkg --list | egrep -i 'apparmor' | wc -l )
+    [ $checkvalue -ge 1 ] && status="installed"
+    echo "Hardening::AppArmor::\t$status"
   }
 
 }
@@ -344,27 +435,38 @@ setup_rootkit_checks () {
 
   ${verboseflag}
 
-  pkgcount=$( dpkg --list | egrep -i 'chkrootkit' | wc -l )
-  [ $pkgcount -lt 1 ] && {
-    {
-      sudo apt-get install chkrootkit -y
-    } 2>$logfile 1>&2
+  [ $installflag = "true" ] && {
+    checkvalue=$( dpkg --list | egrep -i 'chkrootkit' | wc -l )
+    [ $checkvalue -lt 1 ] && {
+      {
+        sudo apt-get install chkrootkit -y
+        sudo chkrootkit
+      } 2>$logfile 1>&2
+    }
+  }
+  [ $verifyflag = "true" ] && {
+    status="unavailable"
+    [ $checkvalue -ge 1 ] && status="installed"
+    echo "Hardening::Chkrootkit::\t$status"
   }
 
-  pkgcount=$( dpkg --list | egrep -i 'rkhunter' | wc -l )
-  [ $pkgcount -lt 1 ] && {
-    {
-      sudo apt-get install rkhunter -y
-      sudo rkhunter --update
-      sudo rkhunter --propupd
-      sudo rkhunter --check
-    } 2>$logfile 1>&2
+  [ $installflag = "true" ] && {
+    checkvalue=$( dpkg --list | egrep -i 'rkhunter' | wc -l )
+    [ $checkvalue -lt 1 ] && {
+      {
+        sudo apt-get install rkhunter -y
+        sudo rkhunter --update
+        sudo rkhunter --propupd
+        sudo rkhunter --check
+        sudo rkhunter --check --sk
+      } 2>$logfile 1>&2
+    }
   }
-
-  {
-    sudo chkrootkit
-    sudo rkhunter --check --sk
-  } 2>$logfile 1>&2
+  [ $verifyflag = "true" ] && {
+    status="unavailable"
+    [ $checkvalue -ge 1 ] && status="installed"
+    echo "Hardening::RKhunter::\t$status"
+  }
 
 }
 
@@ -388,9 +490,10 @@ initialize_options () {
 
   verboseflag=""
   checksumflag="false"
+  installflag="false"
+  verifyflag="false"
 
 }
-
 
 main_logic () { 
 
@@ -402,12 +505,14 @@ main_logic () {
 
 initialize_options
   
-while getopts "hvc" options;
+while getopts "hdcvi" options;
 do
   case "${options}" in
     h) display_help		; exit 0 ;;
-    v) verboseflag='set -x'	; export verboseflag ;;
+    d) verboseflag='set -x'	; export verboseflag ;;
     c) checksumflag=true	; export checksumflag ;;
+    v) verifyflag=true		; export verifyflag ;;
+    i) installflag=true		; export installflag ;;
     *) display_help		; exit 0 ;;
   esac
 done
