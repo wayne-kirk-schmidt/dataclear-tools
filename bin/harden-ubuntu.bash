@@ -271,7 +271,7 @@ secure_shared_memory () {
     [ -f $fstab ] && {
       rm -f $fstab.orig
       cp -p $fstab $fstab.orig
-      [ $checkvalue -lt 10 ] || {
+      [ $checkvalue -lt 10 ] && {
         sudo echo "tmpfs     /dev/shm     tmpfs     defaults,noexec,nosuid     0     0" >> $fstab
       }
     }
