@@ -125,6 +125,7 @@ download_script () {
     mkdir -p $tmpdir
     cd $tmpdir
     rm -f $targetfile
+    sudo apt-get install zip unzip
     wget $githubrepo 2>/dev/null
     unzip $targetfile 2>/dev/null 1>&2
   }
@@ -321,8 +322,8 @@ harden_sshd_config () {
 
   [ $installflag = "true" ] && {
     [ -f $cfgfiledst ] && {
-      [ ! -f $cfgfilebkp ] && cp -p $cfgfiledst $cfgfilebkp
-      [ -f $cfgfilesrc ] && {
+      [ -e $cfgfilebkp ] || cp -p $cfgfiledst $cfgfilebkp
+      [ -e $cfgfilesrc ] && {
         checkvalue=$( cat $cfgfiledst | egrep -i HARDENED | wc -l )
         [ $checkvalue -lt 1 ] && {
           sudo cp -p $cfgfilesrc $cfgfiledst
@@ -449,6 +450,7 @@ setup_rootkit_checks () {
     checkvalue=$( dpkg --list | egrep -i 'rkhunter' | wc -l )
     [ $checkvalue -lt 1 ] && {
       {
+        sudo apt-get install binutils libreadline5 libruby ruby ruby ssl-cert unhide.rb mailutils
         sudo apt-get install rkhunter -y
         sudo rkhunter --update
         sudo rkhunter --propupd
