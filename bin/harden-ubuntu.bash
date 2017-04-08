@@ -450,11 +450,10 @@ setup_rootkit_checks () {
     checkvalue=$( dpkg --list | egrep -i 'rkhunter' | wc -l )
     [ $checkvalue -lt 1 ] && {
       {
-        sudo apt-get install binutils libreadline5 libruby ruby ruby ssl-cert unhide.rb mailutils
-        sudo apt-get install rkhunter -y
+        sudo DEBIAN_FRONTEND=noninteractive apt-get -yq install rkhunter
+        sudo DEBIAN_FRONTEND=noninteractive sudo apt-get -yq install binutils libreadline5 libruby ruby ruby ssl-cert unhide.rb mailutils
         sudo rkhunter --update
         sudo rkhunter --propupd
-        sudo rkhunter --check
         sudo rkhunter --check --sk
       } 2>$logfile 1>&2
     }
